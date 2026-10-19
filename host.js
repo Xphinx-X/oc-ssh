@@ -148,34 +148,61 @@ module.exports = function main(argv) {
 
     if (opts.tunnel) {
       console.log('');
-      console.log('Starting tunnel (localtunnel)...');
-      const lt = spawn('npx', ['--yes', 'localtunnel', '--port', String(opts.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-      let printed = false;
-      const handleData = (data) => {
-        const text = data.toString();
-        const m = text.match(/https:\/\/[a-z0-9-]+\.loca\.lt/);
-        if (m && !printed) {
-          printed = true;
-          const publicUrl = m[0] + '?password=' + encodeURIComponent(opts.password);
-          // convert to ocssh-style? keep https URL; client supports https
-          const connUrl = m[0] + '?password=' + encodeURIComponent(opts.password);
-          console.log('Tunnel URL:', connUrl);
-          try {
-            const qrcode = require('qrcode-terminal');
-            console.log('Tunnel QR code:');
-            qrcode.generate(connUrl, { small: true });
-            console.log('');
-          } catch {}
-          console.log('Connect via tunnel:');
-          console.log(`  python3 client-termux.py ${connUrl}`);
-        }
-      };
-      lt.stdout.on('data', handleData);
-      lt.stderr.on('data', handleData);
-      lt.on('close', (code) => {
-        console.log('Tunnel exited with code', code);
-      });
-      process.on('exit', () => { try { lt.kill(); } catch {} });
+      const path = require('path');
+      const fs = require('fs');
+      const localCf = path.join(process.cwd(), 'bin', 'cloudflared');
+      const cfBin = fs.existsSync(localCf) ? localCf : (require('child_process').execSync('command -v cloudflared || true').toString().trim() || null);
+      if (cfBin) {
+        console.log('Starting tunnel (cloudflared)...');
+        const cf = spawn(cfBin, ['tunnel', '--url', `http://localhost:${opts.port}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let printed = false;
+        const handleData = (data) => {
+          const text = data.toString();
+          const m = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+          if (m && !printed) {
+            printed = true;
+            const connUrl = m[0] + '?password=' + encodeURIComponent(opts.password);
+            console.log('Tunnel URL:', connUrl);
+            try {
+              const qrcode = require('qrcode-terminal');
+              console.log('Tunnel QR code:');
+              qrcode.generate(connUrl, { small: true });
+              console.log('');
+            } catch {}
+            console.log('Connect via tunnel:');
+            console.log(`  python3 client-termux.py ${connUrl}`);
+          }
+        };
+        cf.stdout.on('data', handleData);
+        cf.stderr.on('data', handleData);
+        cf.on('close', (code) => { console.log('Tunnel exited with code', code); });
+        process.on('exit', () => { try { cf.kill(); } catch {} });
+      } else {
+        console.log('Starting tunnel (localtunnel)...');
+        const lt = spawn('npx', ['--yes', 'localtunnel', '--port', String(opts.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let printed = false;
+        const handleData = (data) => {
+          const text = data.toString();
+          const m = text.match(/https:\/\/[a-z0-9-]+\.loca\.lt/);
+          if (m && !printed) {
+            printed = true;
+            const connUrl = m[0] + '?password=' + encodeURIComponent(opts.password);
+            console.log('Tunnel URL:', connUrl);
+            try {
+              const qrcode = require('qrcode-terminal');
+              console.log('Tunnel QR code:');
+              qrcode.generate(connUrl, { small: true });
+              console.log('');
+            } catch {}
+            console.log('Connect via tunnel:');
+            console.log(`  python3 client-termux.py ${connUrl}`);
+          }
+        };
+        lt.stdout.on('data', handleData);
+        lt.stderr.on('data', handleData);
+        lt.on('close', (code) => { console.log('Tunnel exited with code', code); });
+        process.on('exit', () => { try { lt.kill(); } catch {} });
+      }
     }
   });
 };
