@@ -93,6 +93,7 @@ Host (node-pty)  <-->  WebSocket  <-->  Client (Termux/Node)
 - After auth, input/output are sent as **binary** WebSocket frames.
 - Resize and ping use small JSON control messages.
 - Keepalive pings every 5 seconds prevent idle disconnects.
+- Automatic reconnect with exponential backoff on connection loss.
 
 ## Troubleshooting
 

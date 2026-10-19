@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import sys
-import time
 import socket
 import ssl
 import json
@@ -11,13 +10,13 @@ import threading
 import termios
 import tty
 import signal
+import time
 import getpass
 
 def parse_url(input_url):
     s = input_url.strip()
     if '://' not in s:
         s = 'http://' + s
-    # normalize ocssh -> http
     s = s.replace('ocssh://', 'http://').replace('ocsshs://', 'https://')
     from urllib.parse import urlparse, parse_qs
     u = urlparse(s)
@@ -59,10 +58,11 @@ def ws_connect(host, port, secure=False):
         f"Connection: Upgrade\r\n"
         f"Sec-WebSocket-Key: {key}\r\n"
         f"Sec-WebSocket-Version: 13\r\n"
+        f"Bypass-Tunnel-Reminder: true\r\n"
+        f"User-Agent: oc-ssh\r\n"
         f"\r\n"
     )
     sock.sendall(req.encode())
-    # read response headers
     buf = b''
     while b'\r\n\r\n' not in buf:
         chunk = sock.recv(4096)
@@ -76,7 +76,6 @@ def ws_connect(host, port, secure=False):
     return sock, rest
 
 def send_frame(sock, payload_bytes, opcode=0x1, mask=True):
-    # client frames must be masked
     b1 = 0x80 | (opcode & 0x0f)
     length = len(payload_bytes)
     header = bytes([b1])
@@ -98,7 +97,6 @@ def send_text(sock, text):
     send_frame(sock, text.encode('utf-8'), opcode=0x1)
 
 def recv_exact(sock, n, buf_holder):
-    # buf_holder: list with leftover bytes
     data = buf_holder[0]
     while len(data) < n:
         chunk = sock.recv(4096)
@@ -110,10 +108,8 @@ def recv_exact(sock, n, buf_holder):
     return result
 
 def recv_frame(sock, buf_holder):
-    # returns (opcode, payload_bytes)
     h = recv_exact(sock, 2, buf_holder)
     b1, b2 = h[0], h[1]
-    fin = b1 & 0x80
     opcode = b1 & 0x0f
     masked = bool(b2 & 0x80)
     length = b2 & 0x7f
@@ -129,15 +125,7 @@ def recv_frame(sock, buf_holder):
         payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
     return opcode, payload
 
-def main():
-    if len(sys.argv) < 2:
-        print('Usage: python3 client-termux.py <url> [--password <pw>]', file=sys.stderr)
-        sys.exit(1)
-    url = sys.argv[1]
-    password = None
-    if '--password' in sys.argv:
-        idx = sys.argv.index('--password')
-        password = sys.argv[idx+1]
+def connect_once(url, password):
     host, port, url_pw, secure = parse_url(url)
     if password is None:
         password = url_pw
@@ -147,16 +135,13 @@ def main():
     sock, leftover = ws_connect(host, port, secure)
     buf_holder = [leftover]
 
-    # auth
     send_text(sock, json.dumps({'type': 'auth', 'password': password}))
 
-    # wait for auth_ok
     authenticated = False
     while not authenticated:
         opcode, payload = recv_frame(sock, buf_holder)
-        if opcode == 0x8:  # close
-            print('Connection closed', file=sys.stderr)
-            sys.exit(1)
+        if opcode == 0x8:
+            raise ConnectionError('connection closed during auth')
         if opcode == 0x1:
             try:
                 msg = json.loads(payload.decode('utf-8'))
@@ -166,12 +151,11 @@ def main():
                 authenticated = True
             elif msg and msg.get('type') == 'auth_fail':
                 print('Authentication failed', file=sys.stderr)
-                sys.exit(1)
+                return False
             elif msg and msg.get('type') == 'error':
                 print('Server error:', msg.get('message'), file=sys.stderr)
-                sys.exit(1)
+                return False
 
-    # terminal raw mode
     is_tty = sys.stdin.isatty()
     old_settings = None
     if is_tty:
@@ -181,18 +165,13 @@ def main():
 
     def restore():
         if is_tty and old_settings is not None:
-            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
+            try:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
+            except Exception:
+                pass
 
-    # send initial resize
-    try:
-        if is_tty:
-            size = os.get_terminal_size(sys.stdout.fileno())
-            send_text(sock, json.dumps({'type': 'resize', 'cols': size.columns, 'rows': size.lines}))
-    except Exception:
-        pass
-
-    # stdin thread
     stop = threading.Event()
+
     def stdin_loop():
         try:
             while not stop.is_set():
@@ -205,10 +184,6 @@ def main():
         finally:
             stop.set()
 
-    t = threading.Thread(target=stdin_loop, daemon=True)
-    t.start()
-
-    # keepalive to prevent tunnel/proxy idle timeouts
     def keepalive_loop():
         while not stop.is_set():
             time.sleep(5)
@@ -218,10 +193,24 @@ def main():
                 send_text(sock, json.dumps({'type': 'ping'}))
             except Exception:
                 break
+            # quickack
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=stdin_loop, daemon=True)
+    t.start()
     ka = threading.Thread(target=keepalive_loop, daemon=True)
     ka.start()
 
-    # handle SIGWINCH
+    try:
+        if is_tty:
+            size = os.get_terminal_size(sys.stdout.fileno())
+            send_text(sock, json.dumps({'type': 'resize', 'cols': size.columns, 'rows': size.lines}))
+    except Exception:
+        pass
+
     def on_winch(signum, frame):
         try:
             size = os.get_terminal_size(sys.stdout.fileno())
@@ -233,13 +222,14 @@ def main():
     except Exception:
         pass
 
+    clean_exit = False
     try:
         while True:
             opcode, payload = recv_frame(sock, buf_holder)
             if opcode == 0x8:
                 break
-            if opcode == 0x9:  # ping
-                send_frame(sock, payload, opcode=0xA)  # pong
+            if opcode == 0x9:
+                send_frame(sock, payload, opcode=0xA)
                 continue
             if opcode == 0x1:
                 try:
@@ -247,21 +237,20 @@ def main():
                 except Exception:
                     msg = None
                 if msg and msg.get('type') == 'exit':
+                    clean_exit = True
                     break
                 if msg and msg.get('type') == 'pong':
                     continue
-                # if JSON message not output, maybe write raw
-                if msg and 'data' in msg and msg.get('type') == 'output':
+                if msg and msg.get('type') == 'output' and 'data' in msg:
                     sys.stdout.buffer.write(msg['data'].encode('utf-8'))
                     sys.stdout.buffer.flush()
                     continue
-                # fallback: write payload as text
                 sys.stdout.buffer.write(payload)
                 sys.stdout.buffer.flush()
-            elif opcode == 0x2:  # binary
+            elif opcode == 0x2:
                 sys.stdout.buffer.write(payload)
                 sys.stdout.buffer.flush()
-    except (ConnectionError, OSError):
+    except (ConnectionError, OSError, TimeoutError):
         pass
     finally:
         stop.set()
@@ -270,6 +259,35 @@ def main():
             sock.close()
         except Exception:
             pass
+
+    return clean_exit
+
+def main():
+    if len(sys.argv) < 2:
+        print('Usage: python3 client-termux.py <url> [--password <pw>]', file=sys.stderr)
+        sys.exit(1)
+    url = sys.argv[1]
+    password = None
+    if '--password' in sys.argv:
+        idx = sys.argv.index('--password')
+        password = sys.argv[idx + 1]
+
+    retries = 0
+    while True:
+        try:
+            clean = connect_once(url, password)
+            if clean:
+                break
+            # connection dropped unexpectedly; reconnect
+            print('\r\n[oc-ssh] connection lost, reconnecting...', file=sys.stderr)
+        except KeyboardInterrupt:
+            break
+        retries += 1
+        if retries > 20:
+            print('[oc-ssh] too many retries, giving up', file=sys.stderr)
+            break
+        delay = min(2 ** retries, 10)
+        time.sleep(delay)
 
 if __name__ == '__main__':
     main()

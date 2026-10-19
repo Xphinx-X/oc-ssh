@@ -2,6 +2,20 @@ const http = require('http');
 const { spawn } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
+
+const MAX_SESSIONS = 20;
+const sessions = new Set();
+
+function safeEqual(a, b) {
+  try {
+    const ba = Buffer.from(String(a));
+    const bb = Buffer.from(String(b));
+    if (ba.length !== bb.length) return false;
+    return crypto.timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 
@@ -56,8 +70,15 @@ module.exports = function main(argv) {
 
   wss.on('connection', (ws, req) => {
     try { if (ws._socket) { ws._socket.setNoDelay(true); ws._socket.setKeepAlive(true, 10000); } } catch {}
+    if (sessions.size >= MAX_SESSIONS) {
+      try { ws.close(4008, 'too many sessions'); } catch {}
+      return;
+    }
+    sessions.add(ws);
     let authenticated = false;
     let proc = null;
+    let lastPong = Date.now();
+    ws.on('pong', () => { lastPong = Date.now(); });
     let authTimer = setTimeout(() => {
       if (!authenticated) { try { ws.close(4001, 'auth timeout'); } catch {} }
     }, 15000);
@@ -66,7 +87,7 @@ module.exports = function main(argv) {
       if (!authenticated) {
         let msg;
         try { msg = JSON.parse(raw.toString()); } catch { msg = null; }
-        if (msg && msg.type === 'auth' && msg.password === opts.password) {
+        if (msg && msg.type === 'auth' && safeEqual(msg.password, opts.password)) {
           authenticated = true;
           clearTimeout(authTimer);
           ws.send(JSON.stringify({ type: 'auth_ok' }));
@@ -117,14 +138,33 @@ module.exports = function main(argv) {
       }
     });
 
+    const pingInterval = setInterval(() => {
+      if (Date.now() - lastPong > 60000) {
+        try { ws.close(4000, 'pong timeout'); } catch {}
+      } else {
+        try { ws.ping(); } catch {}
+      }
+    }, 30000);
+
     ws.on('close', () => {
+      clearInterval(pingInterval);
       clearTimeout(authTimer);
+      sessions.delete(ws);
       if (proc) try { proc.kill(); } catch {}
     });
     ws.on('error', () => {
+      clearInterval(pingInterval);
       if (proc) try { proc.kill(); } catch {}
     });
   });
+
+  const shutdown = () => {
+    for (const ws of sessions) { try { ws.close(1001, 'server shutdown'); } catch {} }
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 2000).unref();
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 
   server.listen(opts.port, bindHost, () => {
     const url = makeConnectionUrl(advertiseHost, opts.port, opts.password);
