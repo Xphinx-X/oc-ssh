@@ -1,11 +1,12 @@
 const http = require('http');
+const { spawn } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 
 function parseArgs(argv) {
-  const opts = { port: 4321, host: '127.0.0.1', lan: false, password: null, shell: process.env.SHELL || '/bin/bash', cols: 80, rows: 24 };
+  const opts = { port: 4321, host: '127.0.0.1', lan: false, password: null, shell: process.env.SHELL || '/bin/bash', cols: 80, rows: 24, tunnel: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--port') opts.port = parseInt(argv[++i], 10);
@@ -15,6 +16,7 @@ function parseArgs(argv) {
     else if (a === '--shell') opts.shell = argv[++i];
     else if (a === '--cols') opts.cols = parseInt(argv[++i], 10);
     else if (a === '--rows') opts.rows = parseInt(argv[++i], 10);
+    else if (a === '--tunnel') opts.tunnel = true;
   }
   if (opts.lan) opts.host = '0.0.0.0';
   if (!opts.password) opts.password = crypto.randomBytes(12).toString('base64url');
@@ -143,5 +145,37 @@ module.exports = function main(argv) {
     console.log(`  python3 client-termux.py ${url}`);
     console.log('or');
     console.log(`  node index.js connect ${url}`);
+
+    if (opts.tunnel) {
+      console.log('');
+      console.log('Starting tunnel (localtunnel)...');
+      const lt = spawn('npx', ['--yes', 'localtunnel', '--port', String(opts.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let printed = false;
+      const handleData = (data) => {
+        const text = data.toString();
+        const m = text.match(/https:\/\/[a-z0-9-]+\.loca\.lt/);
+        if (m && !printed) {
+          printed = true;
+          const publicUrl = m[0] + '?password=' + encodeURIComponent(opts.password);
+          // convert to ocssh-style? keep https URL; client supports https
+          const connUrl = m[0] + '?password=' + encodeURIComponent(opts.password);
+          console.log('Tunnel URL:', connUrl);
+          try {
+            const qrcode = require('qrcode-terminal');
+            console.log('Tunnel QR code:');
+            qrcode.generate(connUrl, { small: true });
+            console.log('');
+          } catch {}
+          console.log('Connect via tunnel:');
+          console.log(`  python3 client-termux.py ${connUrl}`);
+        }
+      };
+      lt.stdout.on('data', handleData);
+      lt.stderr.on('data', handleData);
+      lt.on('close', (code) => {
+        console.log('Tunnel exited with code', code);
+      });
+      process.on('exit', () => { try { lt.kill(); } catch {} });
+    }
   });
 };

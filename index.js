@@ -21,6 +21,7 @@ Host options:
   --shell <path>      Shell to spawn (default $SHELL or /bin/bash)
   --cols <n>          Initial columns (default 80)
   --rows <n>          Initial rows (default 24)
+  --tunnel            Expose via public tunnel (localtunnel) for VPN/remote access
 
 Client options:
   --password <pw>     Password (prompted if needed)

@@ -14,6 +14,13 @@ cd oc-ssh
 ./start.sh --port 8080 --password 'my-secret'
 ```
 
+### Remote / VPN access
+If your machine is on a VPN or you need access from outside the LAN:
+```bash
+./start.sh --tunnel
+```
+This creates a public URL (via localtunnel) and prints a new QR code. Connect with that URL.
+
 A lightweight SSH replacement. The host spawns a real PTY shell and exposes it
 over a WebSocket with password authentication. Connection is shared via a URL and
 QR code, like OpenChamber's `connect-url`.
