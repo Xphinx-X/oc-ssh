@@ -62,6 +62,9 @@ module.exports = function main(argv) {
         process.stdin.on('data', (chunk) => {
           ws.send(chunk, { binary: true });
         });
+        setInterval(() => {
+          try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
+        }, 5000);
         // resize
         if (process.stdout.isTTY) {
           const { columns, rows } = process.stdout;

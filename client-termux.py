@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
+import time
 import socket
 import ssl
 import json
@@ -198,6 +199,19 @@ def main():
 
     t = threading.Thread(target=stdin_loop, daemon=True)
     t.start()
+
+    # keepalive to prevent tunnel/proxy idle timeouts
+    def keepalive_loop():
+        while not stop.is_set():
+            time.sleep(5)
+            if stop.is_set():
+                break
+            try:
+                send_text(sock, json.dumps({'type': 'ping'}))
+            except Exception:
+                break
+    ka = threading.Thread(target=keepalive_loop, daemon=True)
+    ka.start()
 
     # handle SIGWINCH
     def on_winch(signum, frame):
