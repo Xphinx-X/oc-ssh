@@ -1,4 +1,21 @@
-# oc-ssh: SSH-like remote terminal (OpenChamber-style connection)
+# oc-ssh
+
+SSH-like remote terminal with OpenChamber-style connection (QR code, URL input, password).
+
+`oc-ssh` runs a PTY shell on the host machine and exposes it over a WebSocket with
+password authentication. A client (Termux, or any terminal) connects using a URL or
+QR code—similar to OpenChamber's `connect-url`.
+
+## Features
+
+- Real PTY shell (bash/fish/etc.) over WebSocket
+- Password authentication
+- QR code + connection URL generation (uses `qrcode-terminal`)
+- Works on LAN and through VPNs (Cloudflare quick tunnel)
+- Termux-friendly Python client (stdlib only)
+- Node.js client alternative
+- Keepalive pings to avoid idle disconnects
+- Low-latency binary I/O frames
 
 ## Quick start
 
@@ -9,62 +26,109 @@ cd oc-ssh
 ./start.sh
 ```
 
-`./start.sh` binds to LAN on port 4321 by default. Override:
+`./start.sh` binds to LAN on port `4321` by default.
+
+Override options:
+
 ```bash
 ./start.sh --port 8080 --password 'my-secret'
 ```
 
-### Remote / VPN access
-If your machine is on a VPN or you need access from outside the LAN:
+## VPN / remote access
+
+If the host is on a VPN or you need access from outside the LAN:
+
 ```bash
 ./start.sh --tunnel
 ```
-This creates a public URL (via localtunnel) and prints a new QR code. Connect with that URL.
 
-A lightweight SSH replacement. The host spawns a real PTY shell and exposes it
-over a WebSocket with password authentication. Connection is shared via a URL and
-QR code, like OpenChamber's `connect-url`.
+This starts a Cloudflare quick tunnel and prints a public URL + QR code. Connect with that URL.
 
-## Host (this machine)
+## Client: Termux (proot)
 
-```bash
-# LAN access (Termux on same network)
-node index.js host --lan --port 4321
-
-# custom password
-node index.js host --lan --port 4321 --password 'my-secret'
-
-# loopback only
-node index.js host --port 4321
-```
-
-It prints a connection URL, password, and QR code.
-
-## Client from Termux (proot)
-
-Copy `client-termux.py` into Termux, then:
+Copy `client-termux.py` to Termux and run:
 
 ```bash
 python3 client-termux.py 'ocssh://HOST_IP:4321?password=SECRET'
-# or
-python3 client-termux.py http://HOST_IP:4321 --password SECRET
+# or tunnel URL:
+python3 client-termux.py 'https://your-tunnel.trycloudflare.com?password=SECRET'
 ```
 
-If Python is unavailable in proot, use the Node client:
+Requirements in Termux:
+
+```bash
+pkg install python   # Termux
+# or in proot:
+apt install -y python3
+```
+
+## Client: Node.js
 
 ```bash
 node index.js connect 'ocssh://HOST_IP:4321?password=SECRET'
 ```
 
-## Termux setup (first time)
+## Host options
 
-```bash
-pkg update && pkg install python  # or: pkg install nodejs
-# copy client-termux.py to Termux, e.g. via scp-like or paste
-chmod +x client-termux.py
+| Option | Description | Default |
+|---|---|---|
+| `--port <n>` | Listen port | `4321` |
+| `--host <addr>` | Bind address | `127.0.0.1` |
+| `--lan` | Bind to `0.0.0.0` (LAN access) | off |
+| `--password <pw>` | Password (generated if omitted) | random |
+| `--shell <path>` | Shell to spawn | `$SHELL` or `/bin/bash` |
+| `--cols <n>` | Initial columns | `80` |
+| `--rows <n>` | Initial rows | `24` |
+| `--tunnel` | Expose via Cloudflare quick tunnel | off |
+
+## Architecture
+
+```
+Host (node-pty)  <-->  WebSocket  <-->  Client (Termux/Node)
+        |                                    |
+   PTY shell                         raw terminal mode
 ```
 
-## Notes
-- Requires host and Termux on a reachable network (same LAN, VPN, or tunnel).
-- For internet access, run a tunnel (cloudflared/ngrok) in front of the host port.
-- Password is sent during the WebSocket handshake; use a tunnel with TLS for untrusted networks.
+- Authentication happens first via a JSON `auth` message.
+- After auth, input/output are sent as **binary** WebSocket frames.
+- Resize and ping use small JSON control messages.
+- Keepalive pings every 5 seconds prevent idle disconnects.
+
+## Troubleshooting
+
+### Connection timeout
+- Ensure host and client are on the same network, or use `--tunnel`.
+- Check host firewall allows the port.
+- Verify the IP: `hostname -I` on the host.
+
+### Idle disconnects
+- Keep typing or run a long-lived command (`top`, `tail -f`).
+- Ensure you are using the latest `client-termux.py`.
+
+### node-pty build issues
+- `./install.sh` installs dependencies. On some systems, allow install scripts:
+  ```bash
+  npm install-scripts approve node-pty
+  npm install
+  ```
+
+### Tunnel URL changed
+- Quick tunnel URLs are ephemeral. Re-run `./start.sh --tunnel` and use the new URL.
+
+## Performance tips
+
+- Prefer LAN over tunnel for lowest latency.
+- Use binary frames (enabled by default) for keystrokes.
+- Avoid flooding the terminal with huge output while typing.
+- `TCP_NODELAY` and `TCP_QUICKACK` are enabled on both sides.
+
+## Security notes
+
+- Password is sent during the WebSocket handshake. Use a tunnel with TLS for untrusted networks.
+- For production, consider adding TLS and stronger auth.
+
+## License
+
+MIT
+EOF
+echo done
