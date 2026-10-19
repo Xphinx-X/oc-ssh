@@ -126,7 +126,3 @@ Host (node-pty)  <-->  WebSocket  <-->  Client (Termux/Node)
 
 - Password is sent during the WebSocket handshake. Use a tunnel with TLS for untrusted networks.
 - For production, consider adding TLS and stronger auth.
-
-
-EOF
-echo done
