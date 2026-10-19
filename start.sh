@@ -4,7 +4,13 @@ cd "$(dirname "$0")"
 
 PORT="${PORT:-4321}"
 PASSWORD="${PASSWORD:-}"
-TUNNEL="${TUNNEL:-0}"
+if [ -z "${TUNNEL+x}" ]; then
+  if [ -x ./bin/cloudflared ] || command -v cloudflared >/dev/null 2>&1; then
+    TUNNEL=1
+  else
+    TUNNEL=0
+  fi
+fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is required. Run ./install.sh or install Node.js first."
