@@ -55,6 +55,7 @@ module.exports = function main(argv) {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws, req) => {
+    try { if (ws._socket) { ws._socket.setNoDelay(true); ws._socket.setKeepAlive(true, 10000); } } catch {}
     let authenticated = false;
     let proc = null;
     let authTimer = setTimeout(() => {

@@ -31,9 +31,17 @@ def parse_url(input_url):
 
 def ws_connect(host, port, secure=False):
     sock = socket.create_connection((host, port), timeout=10)
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except Exception:
+        pass
     if secure:
         ctx = ssl.create_default_context()
         sock = ctx.wrap_socket(sock, server_hostname=host)
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
     key = base64.b64encode(os.urandom(16)).decode()
     req = (
         f"GET /ws HTTP/1.1\r\n"
@@ -182,7 +190,7 @@ def main():
                 data = os.read(sys.stdin.fileno(), 1024)
                 if not data:
                     break
-                send_text(sock, json.dumps({'type': 'input', 'data': data.decode('utf-8', 'replace')}))
+                send_frame(sock, data, opcode=0x2)
         except Exception:
             pass
         finally:

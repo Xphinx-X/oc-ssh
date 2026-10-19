@@ -36,6 +36,7 @@ module.exports = function main(argv) {
   let authenticated = false;
 
   ws.on('open', () => {
+    try { ws._socket.setNoDelay(true); } catch {}
     if (!password) {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       rl.question('Password: ', (pw) => {
@@ -59,8 +60,7 @@ module.exports = function main(argv) {
         }
         process.stdin.resume();
         process.stdin.on('data', (chunk) => {
-          // send as input JSON for simplicity
-          ws.send(JSON.stringify({ type: 'input', data: chunk.toString('utf8') }));
+          ws.send(chunk, { binary: true });
         });
         // resize
         if (process.stdout.isTTY) {
