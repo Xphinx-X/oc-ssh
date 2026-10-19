@@ -46,11 +46,16 @@ This starts a Cloudflare quick tunnel and prints a public URL + QR code. Connect
 
 ## Client: Termux (proot)
 
-Copy `client-termux.py` to Termux and run:
+Copy `client-termux.py` (and optionally `connect.sh`) to Termux and run:
 
 ```bash
+# Easy (uses ./connect.sh)
+./connect.sh 192.168.1.5:4321
+./connect.sh 192.168.1.5:4321 my-password
+./connect.sh 'https://your-tunnel.trycloudflare.com?password=SECRET'
+
+# Or directly
 python3 client-termux.py 'ocssh://HOST_IP:4321?password=SECRET'
-# or tunnel URL:
 python3 client-termux.py 'https://your-tunnel.trycloudflare.com?password=SECRET'
 ```
 
