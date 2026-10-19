@@ -22,6 +22,13 @@ if [ ! -d node_modules ]; then
   ./install.sh
 fi
 
+# Free the port if a previous instance is still running
+if fuser "${PORT}/tcp" >/dev/null 2>&1; then
+  echo "Port ${PORT} in use; stopping previous instance..."
+  fuser -k "${PORT}/tcp" >/dev/null 2>&1 || true
+  sleep 1
+fi
+
 EXTRA=("$@")
 HAS_PORT=false
 HAS_PASSWORD=false
