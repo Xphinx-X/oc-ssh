@@ -52,7 +52,7 @@ module.exports = function main(argv) {
     res.end();
   });
 
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({ server, path: '/ws', perMessageDeflate: false, maxPayload: 16 * 1024 * 1024 });
 
   wss.on('connection', (ws, req) => {
     try { if (ws._socket) { ws._socket.setNoDelay(true); ws._socket.setKeepAlive(true, 10000); } } catch {}
@@ -85,7 +85,7 @@ module.exports = function main(argv) {
             return;
           }
           proc.onData((data) => {
-            try { ws.send(data, { binary: true }); } catch {}
+            try { ws.send(data, { binary: true, compress: false }); } catch {}
           });
           proc.onExit(({ exitCode }) => {
             try { ws.send(JSON.stringify({ type: 'exit', code: exitCode })); } catch {}

@@ -36,11 +36,19 @@ def ws_connect(host, port, secure=False):
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     except Exception:
         pass
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
+    except Exception:
+        pass
     if secure:
         ctx = ssl.create_default_context()
         sock = ctx.wrap_socket(sock, server_hostname=host)
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
         except Exception:
             pass
     key = base64.b64encode(os.urandom(16)).decode()
@@ -188,7 +196,7 @@ def main():
     def stdin_loop():
         try:
             while not stop.is_set():
-                data = os.read(sys.stdin.fileno(), 1024)
+                data = os.read(sys.stdin.fileno(), 4096)
                 if not data:
                     break
                 send_frame(sock, data, opcode=0x2)

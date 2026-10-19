@@ -34,6 +34,10 @@ Examples:
 `);
 }
 
+if (cmd === '--version' || cmd === '-v') {
+  console.log(require('./package.json').version);
+  process.exit(0);
+}
 if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
   usage();
   process.exit(0);
